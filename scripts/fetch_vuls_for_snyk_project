@@ -1,0 +1,100 @@
+# This script is meant to pull Snyk vulns into
+# a Pandas data frame so it can be used for more
+# customized downstream reporting and action
+# There's also a bit of flexibility into how far back you want to look in time for vuln creation and the severity level is issues you want to filter
+import os
+import json
+import requests
+import pandas as pd
+from datetime import date, timedelta
+
+DAYS_LOOKBACK = 180
+days_ago = str(date.today() - timedelta(DAYS_LOOKBACK))
+today = str(date.today())
+
+# SNYK_TOKEN is using Jupyter style secrets. Change to fetch from env variable if you go that route.
+snyk_api_token = SNYK_TOKEN
+# add in the org id(s) for the Synk orgs you want to pull from
+org_ids = os.environ.get("ORG_ID")
+
+# Params for the N latest issues
+LIMIT = 200
+URL = 'https://api.snyk.io/v1/reporting/issues/?from={}&to={}&sortBy=severity&order=desc&page=1&perPage={}'.format(days_ago, today, LIMIT)
+HEADERS = {"Authorization": "Token {}".format(snyk_api_token)}
+DATA = {
+    "filters": {
+        "orgs": [org_ids], 
+        "types": [
+            "vuln",
+            "license",
+            "configuration"
+        ],
+        "severity": [
+            "critical",
+            "high",
+            #"medium",
+            #"low"
+        ],
+    }
+}
+
+print(URL)
+
+# Get Latest Issues as dict
+r = requests.post(URL, headers=HEADERS, json=DATA)
+json_response = json.loads(r.content)
+
+# Filter for yesterday's results
+days_ago_results = []
+for result in json_response['results']:
+    if days_ago <= result['introducedDate'] and result['introducedDate'] < today:
+        days_ago_results.append(result)
+
+# Create a DataFrame
+data = []
+for result in days_ago_results:
+    data.append({
+        "introducedDate": result.get('introducedDate', ''),
+        "issue_severity": result['issue'].get('severity', ''),
+        "issue_priorityScore": result['issue'].get('priorityScore', ''),
+        "issue_title": result['issue'].get('title', ''),
+        "isFixed": result.get('isFixed', False),
+        "project_name": result['project'].get('name', ''),
+        "issue_jiraIssueUrl": result['issue'].get('jiraIssueUrl', ''),
+        "issue_CVSSv3": result['issue'].get('CVSSv3', ''),
+        "issue_credit": ', '.join(result['issue'].get('credit', [''])), 
+        "issue_cvssScore": result['issue'].get('cvssScore', ''),
+        "issue_disclosureTime": result['issue'].get('disclosureTime', ''),
+        "issue_exploitMaturity": result['issue'].get('exploitMaturity', ''),
+        "issue_id": result['issue'].get('id', ''),
+        "issue_CVE": ', '.join(result['issue'].get('identifiers', {}).get('CVE', [''])),
+        "issue_CWE": ', '.join(result['issue'].get('identifiers', {}).get('CWE', [''])),
+        "issue_OSVDB": ', '.join(result['issue'].get('identifiers', {}).get('OSVDB', [''])),
+        "issue_isIgnored": result['issue'].get('isIgnored', False),
+        "issue_isPatchable": result['issue'].get('isPatchable', False),
+        "issue_isPatched": result['issue'].get('isPatched', False),
+        "issue_isPinnable": result['issue'].get('isPinnable', False),
+        "issue_isUpgradable": result['issue'].get('isUpgradable', False),
+        "issue_language": result['issue'].get('language', ''),
+        "issue_originalSeverity": result['issue'].get('originalSeverity', ''),
+        "issue_package": result['issue'].get('package', ''),
+        "issue_packageManager": result['issue'].get('packageManager', ''),
+        "issue_patches": ', '.join(result['issue'].get('patches', [])),
+        "issue_publicationTime": result['issue'].get('publicationTime', ''),
+        "issue_reachability": result['issue'].get('reachability', ''),
+        "issue_semver_vulnerable": ', '.join(result['issue']['semver'].get('vulnerable', [])),
+        "issue_type": result['issue'].get('type', ''),
+        "issue_uniqueSeveritiesList": ', '.join(result['issue'].get('uniqueSeveritiesList', [])),
+        "issue_url": result['issue'].get('url', ''),
+        "project_id": result['project'].get('id', ''),
+        "project_packageManager": result['project'].get('packageManager', ''),
+        "project_source": result['project'].get('source', ''),
+        "project_targetFile": result['project'].get('targetFile', ''),
+        "project_url": result['project'].get('url', ''),
+    })
+
+
+df = pd.DataFrame(data)
+
+# Display the DataFrame (optional, for visual verification)
+df.head()
